@@ -52,11 +52,30 @@ func NewTappableSelect(options []string, onChanged func(string)) *TappableSelect
 	return p
 }
 
+// PassiveEntry forwards scroll wheel events to a parent scroll container
+// so that window scrolling works even when the cursor is over a text field.
+type PassiveEntry struct {
+	widget.Entry
+	ParentScroll *container.Scroll
+}
+
+func NewPassiveEntry() *PassiveEntry {
+	p := &PassiveEntry{}
+	p.ExtendBaseWidget(p)
+	return p
+}
+
+func (p *PassiveEntry) Scrolled(ev *fyne.ScrollEvent) {
+	if p.ParentScroll != nil {
+		p.ParentScroll.Scrolled(ev)
+	}
+}
+
 func main() {
 	myApp := app.NewWithID("8051prog")
 	w := myApp.NewWindow("8051 Programmer")
-	w.Resize(fyne.NewSize(900, 640))
-
+	w.Resize(fyne.NewSize(900, 600))
+	// allow user resizing/maximize
 	// Programmer & Chip
 	progSelect := widget.NewSelect([]string{defaultProgrammer}, nil)
 	progSelect.SetSelected(defaultProgrammer)
@@ -87,7 +106,7 @@ func main() {
 	}
 
 	// hex file entry + choose button
-	hexEntry := widget.NewEntry()
+	hexEntry := NewPassiveEntry()
 	hexEntry.SetPlaceHolder("Path to .hex file for flashing or reading")
 	chooseHexBtn := widget.NewButtonWithIcon("", theme.FolderOpenIcon(), func() {
 		d := dialog.NewFileOpen(func(r fyne.URIReadCloser, err error) {
@@ -101,12 +120,9 @@ func main() {
 	chooseHexBtn.Importance = widget.LowImportance // make it small/flat
 	hexRow := container.NewBorder(nil, nil, nil, chooseHexBtn, hexEntry)
 
-	// Output area: disabled (read-only) entry placed into its own VScroll
+	// Output area: read-only multiline entry with both-axis scrolling and no wrap
 	outputBox := widget.NewMultiLineEntry()
-	outputBox.Wrapping = fyne.TextWrapWord
-	outputBox.Disable()
-	outputBox.SetMinRowsVisible(20)
-	outputScroll := container.NewVScroll(outputBox)
+	outputScroll := container.NewScroll(outputBox)
 	outputScroll.SetMinSize(fyne.NewSize(800, 320))
 
 	// Advanced options widgets
@@ -119,11 +135,11 @@ func main() {
 	verbosity := widget.NewSelect([]string{"0", "1", "2", "3", "4"}, nil)
 	verbosity.SetSelected("0")
 
-	baudEntry := widget.NewEntry()
+	baudEntry := NewPassiveEntry()
 	baudEntry.SetPlaceHolder("19200")
 	baudEntry.SetText("19200")
 
-	confEntry := widget.NewEntry()
+	confEntry := NewPassiveEntry()
 	confEntry.SetPlaceHolder("Custom avrdude.conf (optional)")
 	chooseConfBtn := widget.NewButtonWithIcon("", theme.FolderOpenIcon(), func() {
 		d := dialog.NewFileOpen(func(r fyne.URIReadCloser, err error) {
@@ -188,7 +204,7 @@ func main() {
 
 	eraseBtn := widget.NewButton("Erase", func() {
 		args := buildAvrdudeArgs(
-			"-e",
+			"",
 			serialDropdown.Selected,
 			progSelect.Selected,
 			chipSelect.Selected,
@@ -197,7 +213,7 @@ func main() {
 			forceChk.Checked,
 			disableVerifyChk.Checked,
 			disableEraseChk.Checked,
-			eraseEEPROMChk.Checked,
+			true,
 			doNotWriteChk.Checked,
 			verbosity.Selected,
 			baudEntry.Text,
@@ -218,7 +234,12 @@ func main() {
 		outputScroll,
 	)
 
-	w.SetContent(content)
+	// Add padding around content to avoid overlapping scrollbars (window vs output)
+	padded := container.NewPadded(content)
+	// Wrap the whole content in a VScroll so that when Advanced opens
+	// and content grows, the window becomes scrollable instead of expanding.
+	rootScroll := container.NewVScroll(padded)
+	w.SetContent(rootScroll)
 	w.ShowAndRun()
 }
 
@@ -285,7 +306,10 @@ func buildAvrdudeArgs(writeTemplate, port, programmer, chip, hexfile, confOverri
 	}
 
 	// operation (flash read/write or erase) - writeTemplate already contains formatted tokens if needed
-	if writeTemplate != "" && hexfile != "" {
+	if writeTemplate != "" {
+		if hexfile == "" {
+			hexfile = "-"
+		}
 		args = append(args, fmt.Sprintf(writeTemplate, hexfile))
 	}
 
@@ -373,10 +397,14 @@ func appendOutput(outputBox *widget.Entry, outputScroll *container.Scroll, text 
 	}
 	// update UI on main thread
 	fyne.CurrentApp().SendNotification(&fyne.Notification{Title: "", Content: ""}) // no-op to ensure UI loop; harmless
-	outputBox.SetText(curr)
+	outputBox.Text = curr
 	outputBox.Refresh()
-	// Scroll to bottom if we have the scroll container
+	// Only scroll if content exceeds the viewport height, so short output stays fully visible.
 	if outputScroll != nil {
-		outputScroll.ScrollToBottom()
+		contentH := outputScroll.Content.Size().Height
+		viewH := outputScroll.Size().Height
+		if contentH > viewH {
+			outputScroll.ScrollToBottom()
+		}
 	}
 }
