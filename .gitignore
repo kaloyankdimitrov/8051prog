@@ -7,6 +7,11 @@
 *.dll
 *.so
 *.dylib
+build
+# binary
+8051prog
+
+
 
 # Test binary, built with `go test -c`
 *.test
@@ -28,8 +33,9 @@ go.work.sum
 .env
 
 # Editor/IDE
-# .idea/
-# .vscode/
+.idea/
+.vscode/
+.DS_Store
 
 # archives
 avrdude*.zip
