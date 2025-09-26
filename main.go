@@ -10,6 +10,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"runtime/debug"
 	"strings"
 
 	"fyne.io/fyne/v2"
@@ -74,7 +75,7 @@ func (p *PassiveEntry) Scrolled(ev *fyne.ScrollEvent) {
 func main() {
 	myApp := app.NewWithID("8051prog")
 	w := myApp.NewWindow("8051 Programmer")
-	w.Resize(fyne.NewSize(900, 600))
+	w.Resize(fyne.NewSize(900, 720))
 	// allow user resizing/maximize
 	// Programmer & Chip
 	progSelect := widget.NewSelect([]string{defaultProgrammer}, nil)
@@ -122,6 +123,8 @@ func main() {
 
 	// Output area: read-only multiline entry with both-axis scrolling and no wrap
 	outputBox := widget.NewMultiLineEntry()
+	outputBox.Wrapping = fyne.TextWrapOff
+	outputBox.TextStyle = fyne.TextStyle{Monospace: true}
 	outputScroll := container.NewScroll(outputBox)
 	outputScroll.SetMinSize(fyne.NewSize(800, 320))
 
@@ -221,6 +224,43 @@ func main() {
 		runAvrdudeAndAttachOutput(args, outputBox, outputScroll, w)
 	})
 
+	// Add a "Clear" button for the output
+	clearBtn := widget.NewButton("Clear", func() {
+		outputBox.SetText("") // wipe the output field
+	})
+	// testBtn := widget.NewButton("Test", func() {
+	// 	go func() {
+	// 		appendOutput(outputBox, outputScroll, fmt.Sprintln("Running: test"))
+
+	// 		cmd := exec.Command("python3", "progress_test.py")
+	// 		stdout, _ := cmd.StdoutPipe()
+	// 		stderr, _ := cmd.StderrPipe()
+
+	// 		if err := cmd.Start(); err != nil {
+	// 			appendOutput(outputBox, outputScroll, fmt.Sprintf("failed to start tvrest: %v\n", err))
+	// 			return
+	// 		}
+
+	// 		go scanPipeToOutput(stdout, outputBox, outputScroll)
+	// 		go scanPipeToOutput(stderr, outputBox, outputScroll)
+
+	// 		go func() {
+	// 			err := cmd.Wait()
+	// 			if err != nil {
+	// 				appendOutput(outputBox, outputScroll, fmt.Sprintf("test finished with error: %v\n", err))
+	// 			} else {
+	// 				appendOutput(outputBox, outputScroll, "test finished successfully\n")
+	// 			}
+	// 		}()
+	// 	}()
+	// })
+
+	outputHeader := container.NewBorder(
+		nil, nil,
+		widget.NewLabelWithStyle("avrdude Output:", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
+		clearBtn,
+	)
+
 	content := container.NewVBox(
 		progChipRow,
 		widget.NewLabelWithStyle("Serial port:", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
@@ -230,7 +270,7 @@ func main() {
 		container.NewGridWithColumns(3, flashBtn, readBtn, eraseBtn),
 		advancedAccordion,
 		widget.NewSeparator(),
-		widget.NewLabelWithStyle("avrdude Output:", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
+		outputHeader,
 		outputScroll,
 	)
 
@@ -381,25 +421,53 @@ func runAvrdudeAndAttachOutput(args []string, outputBox *widget.Entry, outputScr
 }
 
 func scanPipeToOutput(pipe io.ReadCloser, outputBox *widget.Entry, outputScroll *container.Scroll) {
-	s := bufio.NewScanner(pipe)
-	for s.Scan() {
-		line := s.Text()
-		appendOutput(outputBox, outputScroll, line+"\n")
+	reader := bufio.NewReader(pipe)
+	buf := make([]byte, 1024)
+
+	for {
+		n, err := reader.Read(buf)
+		if n > 0 {
+			chunk := string(buf[:n])
+			appendOutput(outputBox, outputScroll, chunk)
+		}
+		if err != nil {
+			if err != io.EOF {
+				fmt.Printf("Stack Trace:\n%s\n", debug.Stack())
+				appendOutput(outputBox, outputScroll, fmt.Sprintf("error reading pipe: %v\n", err))
+			}
+			break
+		}
 	}
 }
 
-// appendOutput appends text to the output entry and scrolls the output Scroll container to bottom
+// appendOutput appends text to the output entry and scrolls the output Scroll container to bottom.
+// It also handles carriage returns (\r) to overwrite the current line for progress bars
 func appendOutput(outputBox *widget.Entry, outputScroll *container.Scroll, text string) {
 	curr := outputBox.Text
-	curr += text
+	for _, ch := range text {
+		if ch == '\r' {
+			// remove last line from curr
+			lastNewline := strings.LastIndex(curr, "\n")
+			if lastNewline >= 0 {
+				curr = curr[:lastNewline+1] // keep everything up to and including the newline
+			} else {
+				curr = "" // no newline yet, clear whole buffer
+			}
+		} else {
+			curr += string(ch)
+		}
+	}
+
+	// Prevent runaway memory growth
 	if len(curr) > 200000 {
 		curr = curr[len(curr)-180000:]
 	}
+
 	// update UI on main thread
-	fyne.CurrentApp().SendNotification(&fyne.Notification{Title: "", Content: ""}) // no-op to ensure UI loop; harmless
 	outputBox.Text = curr
 	outputBox.Refresh()
-	// Only scroll if content exceeds the viewport height, so short output stays fully visible.
+
+	// autoscroll only if content exceeds viewport
 	if outputScroll != nil {
 		contentH := outputScroll.Content.Size().Height
 		viewH := outputScroll.Size().Height
