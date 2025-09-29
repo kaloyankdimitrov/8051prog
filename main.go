@@ -118,6 +118,9 @@ func main() {
 		}, w)
 		d.Show()
 	})
+	w.SetOnDropped(func(_ fyne.Position, uris []fyne.URI) {
+		hexEntry.SetText(uris[0].Path())
+	})
 	chooseHexBtn.Importance = widget.LowImportance // make it small/flat
 	hexRow := container.NewBorder(nil, nil, nil, chooseHexBtn, hexEntry)
 
