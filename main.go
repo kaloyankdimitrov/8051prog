@@ -102,7 +102,12 @@ func main() {
 		if err != nil || len(ports) == 0 {
 			ports = []string{"<no ports found>"}
 		}
-		serialDropdown.Options = ports
+		serialDropdown.Options = []string{}
+		for _, port := range ports {
+			if !strings.HasPrefix(port, "/dev/cu") {
+				serialDropdown.Options = append(serialDropdown.Options, port)
+			}
+		}
 		serialDropdown.Refresh()
 	}
 
