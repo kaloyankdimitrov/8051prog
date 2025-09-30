@@ -201,7 +201,7 @@ func main() {
 			verbosity.Selected,
 			baudEntry.Text,
 		)
-		runAvrdudeAndAttachOutput(args, outputBox, outputScroll, w)
+		runAvrdudeAndAttachOutput(args, outputBox, outputScroll)
 	})
 
 	readBtn := widget.NewButton("Read", func() {
@@ -221,7 +221,7 @@ func main() {
 			verbosity.Selected,
 			baudEntry.Text,
 		)
-		runAvrdudeAndAttachOutput(args, outputBox, outputScroll, w)
+		runAvrdudeAndAttachOutput(args, outputBox, outputScroll)
 	})
 
 	eraseBtn := widget.NewButton("Erase", func() {
@@ -241,35 +241,29 @@ func main() {
 			verbosity.Selected,
 			baudEntry.Text,
 		)
-		runAvrdudeAndAttachOutput(args, outputBox, outputScroll, w)
+		runAvrdudeAndAttachOutput(args, outputBox, outputScroll)
 	})
 
 	// Add a "Clear" button for the output
 	clearBtn := widget.NewButton("Clear", func() {
 		outputBox.SetText("") // wipe the output field
 	})
-	// testBtn := widget.NewButton("Test", func() {
+	// clearBtn := widget.NewButton("Test", func() {
 	// 	go func() {
 	// 		appendOutput(outputBox, outputScroll, fmt.Sprintln("Running: test"))
 
 	// 		cmd := exec.Command("python3", "progress_test.py")
-	// 		stdout, _ := cmd.StdoutPipe()
-	// 		stderr, _ := cmd.StderrPipe()
 
-	// 		if err := cmd.Start(); err != nil {
-	// 			appendOutput(outputBox, outputScroll, fmt.Sprintf("failed to start tvrest: %v\n", err))
-	// 			return
-	// 		}
-
-	// 		go scanPipeToOutput(stdout, outputBox, outputScroll)
-	// 		go scanPipeToOutput(stderr, outputBox, outputScroll)
+	// 		// attach our GUI writer directly
+	// 		cmd.Stdout = &guiWriter{outputBox, outputScroll}
+	// 		cmd.Stderr = &guiWriter{outputBox, outputScroll}
 
 	// 		go func() {
-	// 			err := cmd.Wait()
+	// 			err := cmd.Run() // handles Start + Wait internally
 	// 			if err != nil {
-	// 				appendOutput(outputBox, outputScroll, fmt.Sprintf("test finished with error: %v\n", err))
+	// 				appendOutput(outputBox, outputScroll, fmt.Sprintf("avrdude finished with error: %v\n", err))
 	// 			} else {
-	// 				appendOutput(outputBox, outputScroll, "test finished successfully\n")
+	// 				appendOutput(outputBox, outputScroll, "avrdude finished successfully\n")
 	// 			}
 	// 		}()
 	// 	}()
@@ -409,7 +403,17 @@ func exeName() string {
 }
 
 // runAvrdudeAndAttachOutput streams avrdude stdout/stderr into the output box and attempts to keep it scrolled to bottom.
-func runAvrdudeAndAttachOutput(args []string, outputBox *widget.Entry, outputScroll *container.Scroll, win fyne.Window) {
+type guiWriter struct {
+	outputBox    *widget.Entry
+	outputScroll *container.Scroll
+}
+
+func (w *guiWriter) Write(p []byte) (int, error) {
+	appendOutput(w.outputBox, w.outputScroll, string(p))
+	return len(p), nil
+}
+
+func runAvrdudeAndAttachOutput(args []string, outputBox *widget.Entry, outputScroll *container.Scroll) {
 	avrdudePath, err := locateAvrdude()
 	if err != nil {
 		appendOutput(outputBox, outputScroll, fmt.Sprintf("ERROR: %v\n", err))
@@ -419,19 +423,13 @@ func runAvrdudeAndAttachOutput(args []string, outputBox *widget.Entry, outputScr
 	appendOutput(outputBox, outputScroll, fmt.Sprintf("Running: %s %s\n", avrdudePath, strings.Join(args, " ")))
 
 	cmd := exec.Command(avrdudePath, args...)
-	stdout, _ := cmd.StdoutPipe()
-	stderr, _ := cmd.StderrPipe()
 
-	if err := cmd.Start(); err != nil {
-		appendOutput(outputBox, outputScroll, fmt.Sprintf("failed to start avrdude: %v\n", err))
-		return
-	}
-
-	go scanPipeToOutput(stdout, outputBox, outputScroll)
-	go scanPipeToOutput(stderr, outputBox, outputScroll)
+	// attach our GUI writer directly
+	cmd.Stdout = &guiWriter{outputBox, outputScroll}
+	cmd.Stderr = &guiWriter{outputBox, outputScroll}
 
 	go func() {
-		err := cmd.Wait()
+		err := cmd.Run() // handles Start + Wait internally
 		if err != nil {
 			appendOutput(outputBox, outputScroll, fmt.Sprintf("avrdude finished with error: %v\n", err))
 		} else {
@@ -452,7 +450,7 @@ func scanPipeToOutput(pipe io.ReadCloser, outputBox *widget.Entry, outputScroll 
 		}
 		if err != nil {
 			if err != io.EOF {
-				fmt.Printf("Stack Trace:\n%s\n", debug.Stack())
+				fmt.Printf("Stack Trace:\n%s\n%e\n", debug.Stack(), err)
 				appendOutput(outputBox, outputScroll, fmt.Sprintf("error reading pipe: %v\n", err))
 			}
 			break
