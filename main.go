@@ -126,8 +126,12 @@ func main() {
 	w.SetOnDropped(func(_ fyne.Position, uris []fyne.URI) {
 		hexEntry.SetText(uris[0].Path())
 	})
-	chooseHexBtn.Importance = widget.LowImportance // make it small/flat
-	hexRow := container.NewBorder(nil, nil, nil, chooseHexBtn, hexEntry)
+	removeHexBtn := widget.NewButtonWithIcon("", theme.CancelIcon(), func() {
+		hexEntry.SetText("")
+	})
+	chooseHexBtn.Importance = widget.LowImportance // make them small/flat
+	removeHexBtn.Importance = widget.LowImportance
+	hexRow := container.NewBorder(nil, nil, nil, container.NewHBox(removeHexBtn, chooseHexBtn), hexEntry)
 
 	// Output area: read-only multiline entry with both-axis scrolling and no wrap
 	outputBox := widget.NewMultiLineEntry()
@@ -142,6 +146,7 @@ func main() {
 	disableEraseChk := widget.NewCheck("Disable flash erase (-D)", nil)
 	eraseEEPROMChk := widget.NewCheck("Erase flash and EEPROM (-e)", nil)
 	doNotWriteChk := widget.NewCheck("Do not write (-n)", nil)
+	readToFileChk := widget.NewCheck("Read flash to selected file", nil)
 
 	verbosity := widget.NewSelect([]string{"0", "1", "2", "3", "4"}, nil)
 	verbosity.SetSelected("0")
@@ -161,13 +166,17 @@ func main() {
 		}, w)
 		d.Show()
 	})
+	removeConfBtn := widget.NewButtonWithIcon("", theme.CancelIcon(), func() {
+		confEntry.SetText("")
+	})
 	chooseConfBtn.Importance = widget.LowImportance
-	confRow := container.NewBorder(nil, nil, nil, chooseConfBtn, confEntry)
+	removeConfBtn.Importance = widget.LowImportance
+	confRow := container.NewBorder(nil, nil, nil, container.NewHBox(removeConfBtn, chooseConfBtn), confEntry)
 
 	advancedGrid := container.NewVBox(
 		container.NewGridWithColumns(2, forceChk, eraseEEPROMChk),
 		container.NewGridWithColumns(2, disableVerifyChk, doNotWriteChk),
-		container.NewGridWithColumns(2, disableEraseChk, widget.NewLabel("")),
+		container.NewGridWithColumns(2, disableEraseChk, readToFileChk),
 		container.NewGridWithColumns(2, widget.NewLabel("Verbosity:"), verbosity),
 		container.NewGridWithColumns(2, widget.NewLabel("Baudrate:"), baudEntry),
 		confRow,
@@ -188,13 +197,14 @@ func main() {
 			disableEraseChk.Checked,
 			eraseEEPROMChk.Checked,
 			doNotWriteChk.Checked,
+			true,
 			verbosity.Selected,
 			baudEntry.Text,
 		)
 		runAvrdudeAndAttachOutput(args, outputBox, outputScroll, w)
 	})
 
-	readBtn := widget.NewButton("Read (flash -> file)", func() {
+	readBtn := widget.NewButton("Read", func() {
 		args := buildAvrdudeArgs(
 			"-Uflash:r:%s:i",
 			serialDropdown.Selected,
@@ -207,6 +217,7 @@ func main() {
 			disableEraseChk.Checked,
 			eraseEEPROMChk.Checked,
 			doNotWriteChk.Checked,
+			readToFileChk.Checked,
 			verbosity.Selected,
 			baudEntry.Text,
 		)
@@ -226,6 +237,7 @@ func main() {
 			disableEraseChk.Checked,
 			true,
 			doNotWriteChk.Checked,
+			false,
 			verbosity.Selected,
 			baudEntry.Text,
 		)
@@ -293,7 +305,7 @@ func main() {
 
 // buildAvrdudeArgs composes arguments including advanced flags.
 func buildAvrdudeArgs(writeTemplate, port, programmer, chip, hexfile, confOverride string,
-	force, disableVerify, disableErase, eraseEEPROM, doNotWrite bool,
+	force, disableVerify, disableErase, eraseEEPROM, doNotWrite, useFile bool,
 	verbosity, baud string) []string {
 
 	confPath := confOverride
@@ -355,7 +367,7 @@ func buildAvrdudeArgs(writeTemplate, port, programmer, chip, hexfile, confOverri
 
 	// operation (flash read/write or erase) - writeTemplate already contains formatted tokens if needed
 	if writeTemplate != "" {
-		if hexfile == "" {
+		if hexfile == "" || !useFile {
 			hexfile = "-"
 		}
 		args = append(args, fmt.Sprintf(writeTemplate, hexfile))
