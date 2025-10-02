@@ -14,10 +14,9 @@ import (
 	"fyne.io/fyne/v2/app"
 	"fyne.io/fyne/v2/container"
 	"fyne.io/fyne/v2/dialog"
-	"fyne.io/fyne/v2/driver/desktop"
-	"fyne.io/fyne/v2/driver/mobile"
 	"fyne.io/fyne/v2/theme"
 	"fyne.io/fyne/v2/widget"
+	"image/color"
 	"go.bug.st/serial"
 )
 
@@ -25,6 +24,21 @@ const (
 	defaultProgrammer = "stk500v1"
 	defaultChip       = "at89s51"
 )
+
+// customTheme embeds the original theme and overrides Color for disabled Entry text.
+type customTheme struct {
+	fyne.Theme
+}
+
+func (m customTheme) Color(name fyne.ThemeColorName, variant fyne.ThemeVariant) color.Color {
+	// Intercept the Disabled color for Entry text
+	if name == theme.ColorNameDisabled {
+		// Return regular foreground color instead of disabled color
+		return theme.DefaultTheme().Color(theme.ColorNameForeground, variant)
+	}
+	// Fallback to default behavior
+	return m.Theme.Color(name, variant)
+}
 
 // TappableSelect wraps widget.Select to run a handler when the select is tapped
 type TappableSelect struct {
@@ -78,24 +92,22 @@ type ReadOnlyMultilineEntry struct {
 	widget.Entry
 }
 
-func (entry *ReadOnlyMultilineEntry) MouseUp(event *desktop.MouseEvent) {
-}
-func (entry *ReadOnlyMultilineEntry) MouseDown(event *desktop.MouseEvent) {
-}
-func (entry *ReadOnlyMultilineEntry) TouchUp(event *mobile.TouchEvent) {
-}
-func (entry *ReadOnlyMultilineEntry) TouchDown(event *mobile.TouchEvent) {
-}
-
 func NewReadOnlyMultiLineEntry() *ReadOnlyMultilineEntry {
 	entry := &ReadOnlyMultilineEntry{}
 	entry.MultiLine = true
+	entry.Disable()
+	entry.Wrapping = fyne.TextWrapOff
+	entry.TextStyle = fyne.TextStyle{Monospace: true}
+	entry.SetMinRowsVisible(20)
 	entry.ExtendBaseWidget(entry)
 	return entry
 }
 
 func main() {
 	myApp := app.NewWithID("8051prog")
+
+	// Apply our custom theme
+	myApp.Settings().SetTheme(&customTheme{theme.DefaultTheme()})
 	w := myApp.NewWindow("8051 Programmer")
 	w.Resize(fyne.NewSize(900, 720))
 	// allow user resizing/maximize
@@ -121,15 +133,20 @@ func main() {
 	serialDropdown.OnTapped = func() {
 		// Update available serial ports each time the control is opened
 		ports, err := serial.GetPortsList()
-		if err != nil || len(ports) == 0 {
-			ports = []string{"<no ports found>"}
-		}
-		serialDropdown.Options = []string{}
-		for _, port := range ports {
-			port = strings.TrimSpace(port)
-			// MacOS port filtering
-			if runtime.GOOS != "darwin" || (!strings.HasPrefix(port, "/dev/cu") && !strings.HasSuffix(port, "debug") || !strings.HasSuffix(port, "console") || !strings.HasSuffix(port, "Bluetooth-Incoming-Port")) {
-				serialDropdown.Options = append(serialDropdown.Options, port)
+		if err != nil {
+			serialDropdown.Options = []string{"<no ports found>"}
+		} else {
+			serialDropdown.Options = []string{}
+			for _, port := range ports {
+				port = strings.TrimSpace(port)
+				// MacOS port filtering
+				if runtime.GOOS != "darwin" || (!strings.HasPrefix(port, "/dev/cu") && !strings.HasSuffix(port, "debug") && !strings.HasSuffix(port, "console") && !strings.HasSuffix(port, "Bluetooth-Incoming-Port")) {
+					println(strings.HasPrefix(port, "/dev/cu"))
+					serialDropdown.Options = append(serialDropdown.Options, port)
+				}
+			}
+			if len(serialDropdown.Options) == 0 {
+				serialDropdown.Options = []string{"<no ports found>"}
 			}
 		}
 		serialDropdown.Refresh()
@@ -159,9 +176,6 @@ func main() {
 
 	// Output area: read-only multiline entry with both-axis scrolling and no wrap
 	outputBox := NewReadOnlyMultiLineEntry()
-	outputBox.Wrapping = fyne.TextWrapOff
-	outputBox.TextStyle = fyne.TextStyle{Monospace: true}
-	outputBox.SetMinRowsVisible(20)
 
 	// Advanced options widgets
 	forceChk := widget.NewCheck("Force (-F)", nil)
