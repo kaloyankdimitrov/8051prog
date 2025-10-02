@@ -2,21 +2,20 @@
 package main
 
 import (
-	"bufio"
 	"errors"
 	"fmt"
-	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime"
-	"runtime/debug"
 	"strings"
 
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/app"
 	"fyne.io/fyne/v2/container"
 	"fyne.io/fyne/v2/dialog"
+	"fyne.io/fyne/v2/driver/desktop"
+	"fyne.io/fyne/v2/driver/mobile"
 	"fyne.io/fyne/v2/theme"
 	"fyne.io/fyne/v2/widget"
 	"go.bug.st/serial"
@@ -66,10 +65,33 @@ func NewPassiveEntry() *PassiveEntry {
 	return p
 }
 
+// TODO: fix
 func (p *PassiveEntry) Scrolled(ev *fyne.ScrollEvent) {
+	println("Here")
 	if p.ParentScroll != nil {
+		println("wtf")
 		p.ParentScroll.Scrolled(ev)
 	}
+}
+
+type ReadOnlyMultilineEntry struct {
+	widget.Entry
+}
+
+func (entry *ReadOnlyMultilineEntry) MouseUp(event *desktop.MouseEvent) {
+}
+func (entry *ReadOnlyMultilineEntry) MouseDown(event *desktop.MouseEvent) {
+}
+func (entry *ReadOnlyMultilineEntry) TouchUp(event *mobile.TouchEvent) {
+}
+func (entry *ReadOnlyMultilineEntry) TouchDown(event *mobile.TouchEvent) {
+}
+
+func NewReadOnlyMultiLineEntry() *ReadOnlyMultilineEntry {
+	entry := &ReadOnlyMultilineEntry{}
+	entry.MultiLine = true
+	entry.ExtendBaseWidget(entry)
+	return entry
 }
 
 func main() {
@@ -104,7 +126,9 @@ func main() {
 		}
 		serialDropdown.Options = []string{}
 		for _, port := range ports {
-			if !strings.HasPrefix(port, "/dev/cu") {
+			port = strings.TrimSpace(port)
+			// MacOS port filtering
+			if runtime.GOOS != "darwin" || (!strings.HasPrefix(port, "/dev/cu") && !strings.HasSuffix(port, "debug") || !strings.HasSuffix(port, "console") || !strings.HasSuffix(port, "Bluetooth-Incoming-Port")) {
 				serialDropdown.Options = append(serialDropdown.Options, port)
 			}
 		}
@@ -134,11 +158,10 @@ func main() {
 	hexRow := container.NewBorder(nil, nil, nil, container.NewHBox(removeHexBtn, chooseHexBtn), hexEntry)
 
 	// Output area: read-only multiline entry with both-axis scrolling and no wrap
-	outputBox := widget.NewMultiLineEntry()
+	outputBox := NewReadOnlyMultiLineEntry()
 	outputBox.Wrapping = fyne.TextWrapOff
 	outputBox.TextStyle = fyne.TextStyle{Monospace: true}
-	outputScroll := container.NewScroll(outputBox)
-	outputScroll.SetMinSize(fyne.NewSize(800, 320))
+	outputBox.SetMinRowsVisible(20)
 
 	// Advanced options widgets
 	forceChk := widget.NewCheck("Force (-F)", nil)
@@ -201,7 +224,7 @@ func main() {
 			verbosity.Selected,
 			baudEntry.Text,
 		)
-		runAvrdudeAndAttachOutput(args, outputBox, outputScroll)
+		runAvrdudeAndAttachOutput(args, outputBox)
 	})
 
 	readBtn := widget.NewButton("Read", func() {
@@ -221,7 +244,7 @@ func main() {
 			verbosity.Selected,
 			baudEntry.Text,
 		)
-		runAvrdudeAndAttachOutput(args, outputBox, outputScroll)
+		runAvrdudeAndAttachOutput(args, outputBox)
 	})
 
 	eraseBtn := widget.NewButton("Erase", func() {
@@ -241,7 +264,7 @@ func main() {
 			verbosity.Selected,
 			baudEntry.Text,
 		)
-		runAvrdudeAndAttachOutput(args, outputBox, outputScroll)
+		runAvrdudeAndAttachOutput(args, outputBox)
 	})
 
 	// Add a "Clear" button for the output
@@ -285,7 +308,7 @@ func main() {
 		advancedAccordion,
 		widget.NewSeparator(),
 		outputHeader,
-		outputScroll,
+		outputBox,
 	)
 
 	// Add padding around content to avoid overlapping scrollbars (window vs output)
@@ -293,6 +316,10 @@ func main() {
 	// Wrap the whole content in a VScroll so that when Advanced opens
 	// and content grows, the window becomes scrollable instead of expanding.
 	rootScroll := container.NewVScroll(padded)
+	// set parent scroll of PassiveEntrys
+	hexEntry.ParentScroll = rootScroll
+	confEntry.ParentScroll = rootScroll
+	baudEntry.ParentScroll = rootScroll
 	w.SetContent(rootScroll)
 	w.ShowAndRun()
 }
@@ -404,63 +431,42 @@ func exeName() string {
 
 // runAvrdudeAndAttachOutput streams avrdude stdout/stderr into the output box and attempts to keep it scrolled to bottom.
 type guiWriter struct {
-	outputBox    *widget.Entry
-	outputScroll *container.Scroll
+	outputBox *ReadOnlyMultilineEntry
 }
 
 func (w *guiWriter) Write(p []byte) (int, error) {
-	appendOutput(w.outputBox, w.outputScroll, string(p))
+	appendOutput(w.outputBox, string(p))
 	return len(p), nil
 }
 
-func runAvrdudeAndAttachOutput(args []string, outputBox *widget.Entry, outputScroll *container.Scroll) {
+func runAvrdudeAndAttachOutput(args []string, outputBox *ReadOnlyMultilineEntry) {
 	avrdudePath, err := locateAvrdude()
 	if err != nil {
-		appendOutput(outputBox, outputScroll, fmt.Sprintf("ERROR: %v\n", err))
+		appendOutput(outputBox, fmt.Sprintf("ERROR: %v\n", err))
 		return
 	}
 
-	appendOutput(outputBox, outputScroll, fmt.Sprintf("Running: %s %s\n", avrdudePath, strings.Join(args, " ")))
+	appendOutput(outputBox, fmt.Sprintf("Running: %s %s\n", avrdudePath, strings.Join(args, " ")))
 
 	cmd := exec.Command(avrdudePath, args...)
 
 	// attach our GUI writer directly
-	cmd.Stdout = &guiWriter{outputBox, outputScroll}
-	cmd.Stderr = &guiWriter{outputBox, outputScroll}
+	cmd.Stdout = &guiWriter{outputBox}
+	cmd.Stderr = &guiWriter{outputBox}
 
 	go func() {
 		err := cmd.Run() // handles Start + Wait internally
 		if err != nil {
-			appendOutput(outputBox, outputScroll, fmt.Sprintf("avrdude finished with error: %v\n", err))
+			appendOutput(outputBox, fmt.Sprintf("avrdude finished with error: %v\n", err))
 		} else {
-			appendOutput(outputBox, outputScroll, "avrdude finished successfully\n")
+			appendOutput(outputBox, "avrdude finished successfully\n")
 		}
 	}()
 }
 
-func scanPipeToOutput(pipe io.ReadCloser, outputBox *widget.Entry, outputScroll *container.Scroll) {
-	reader := bufio.NewReader(pipe)
-	buf := make([]byte, 1024)
-
-	for {
-		n, err := reader.Read(buf)
-		if n > 0 {
-			chunk := string(buf[:n])
-			appendOutput(outputBox, outputScroll, chunk)
-		}
-		if err != nil {
-			if err != io.EOF {
-				fmt.Printf("Stack Trace:\n%s\n%e\n", debug.Stack(), err)
-				appendOutput(outputBox, outputScroll, fmt.Sprintf("error reading pipe: %v\n", err))
-			}
-			break
-		}
-	}
-}
-
 // appendOutput appends text to the output entry and scrolls the output Scroll container to bottom.
 // It also handles carriage returns (\r) to overwrite the current line for progress bars
-func appendOutput(outputBox *widget.Entry, outputScroll *container.Scroll, text string) {
+func appendOutput(outputBox *ReadOnlyMultilineEntry, text string) {
 	curr := outputBox.Text
 	for _, ch := range text {
 		if ch == '\r' {
@@ -482,15 +488,5 @@ func appendOutput(outputBox *widget.Entry, outputScroll *container.Scroll, text 
 	}
 
 	// update UI on main thread
-	outputBox.Text = curr
-	outputBox.Refresh()
-
-	// autoscroll only if content exceeds viewport
-	if outputScroll != nil {
-		contentH := outputScroll.Content.Size().Height
-		viewH := outputScroll.Size().Height
-		if contentH > viewH {
-			outputScroll.ScrollToBottom()
-		}
-	}
+	outputBox.SetText(curr)
 }
