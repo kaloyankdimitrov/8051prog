@@ -1,10 +1,12 @@
 # 8051prog &mdash; A simple GUI programmer for the AT89 series
 
+**WIP: Software and documentation still in development. Use at your own risk and expect breaking changes.**
+
 GUI interface for ISP programming of the at89s5- family of chips with an avr-based programmer(e.g. an Arduino). Functionality includes uploading a hex file, reading or erasing the flash.
 
 <p align="middle">
-	<img src="doc/gui_light.png" width="300" /> 
-	<img src="doc/gui_dark.png" width="300" />
+	<img src="doc/gui_light.png" alt="Light UI" width="49%" /> 
+	<img src="doc/gui_dark.png" alt="Dark UI" width="49%" />
 </p>
 
 This is a Fyne Golang desktop application that uses avrdude with a custom configuration to interact with the programmer over serial.
@@ -19,9 +21,21 @@ This is a Fyne Golang desktop application that uses avrdude with a custom config
 4. In the top green bar, select your board from the dropdown.
 5. Upload the sketch and wait for the upload to finish.
 
+### Wiring
+
+Programming of the AT89 chips is done over SPI(Serial Peripheral Interface). The digital pins(e.g. D11) are for Arduino UNO. Make sure to carefully review the pinout(s) of the board(s) you are using before wiring. Most Arduino boards have a ICSP header that can also be used.
+| Programmer | Chip(AT89-) |
+| :-----| :----- |
+| MOSI(D11) | MOSI |
+| MISO(D12) | MISO |
+| SCK(D13) | SCK |
+| D10 | RST |
+
+_If encountering issues with programming the chip, put a 10uF capactior between RST and GND._
+
 ### Set up 8051prog
 
-1. Download the appropriate binary of this program for your operating system from the GitHub releases page and run it.
+1. Download the appropriate archive of this program for your operating system from the GitHub releases page and run the binary in it.
 2. If not connected already, connect the programmer that you set up in the previous steps through USB to the computer.
 3. Select it from the _Serial Port_ dropdown(should be the same as in the Arduino IDE).
 4. The _Programmer_ dropdown should alredy be _stk500v1_. Do NOT change this if using an Arduino as a programmer.
@@ -54,3 +68,7 @@ Check _Read flash to selected file_ to save the chip's memory contents to the he
 ## Theme
 
 The interfaces's theme is determined by the theme of the operating system's settings.
+
+## Development
+
+To learn the inner workings, look at the [Development Documentation](doc/DEVELOPMENT.md)
